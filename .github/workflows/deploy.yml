@@ -1,0 +1,134 @@
+name: Deploy Angular to GitHub Pages with Coverage Validation
+
+# WORKFLOW IS DISABLED BY DEFAULT
+# Uncomment the 'on.push' section below to enable automatic deployment on push
+# on:
+#   push:
+#     branches: [ main ]
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  test-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      # 2. Setup Node.js (latest LTS)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      # 3. Cache node_modules
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+            
+      # 4. Install dependencies
+      - name: Install dependencies
+        run: npm ci
+        
+      # 5. Run Jest tests and validate coverage ≥ 80%
+      - name: Run tests with coverage validation
+        run: |
+          echo "🧪 Running Jest tests with coverage..."
+          npm run test -- --coverage --watchAll=false
+          
+          echo "📊 Parsing coverage results..."
+          
+          # Extract coverage percentages from the coverage summary
+          COVERAGE_FILE="coverage/coverage-summary.json"
+          
+          if [ ! -f "$COVERAGE_FILE" ]; then
+            echo "❌ Coverage summary not found! Tests may have failed."
+            exit 1
+          fi
+          
+          # Parse total coverage percentage
+          TOTAL_COVERAGE=$(node -p "
+            const fs = require('fs');
+            const coverage = JSON.parse(fs.readFileSync('$COVERAGE_FILE', 'utf8'));
+            const total = coverage.total;
+            Math.min(
+              total.lines.pct,
+              total.statements.pct,
+              total.functions.pct,
+              total.branches.pct
+            );
+          ")
+          
+          echo "📈 Total Coverage: ${TOTAL_COVERAGE}%"
+          
+          # Check if coverage meets minimum requirement (80%)
+          if (( $(echo "$TOTAL_COVERAGE >= 80" | bc -l) )); then
+            echo "✅ Coverage validation passed: ${TOTAL_COVERAGE}% ≥ 80%"
+          else
+            echo "❌ Coverage validation failed: ${TOTAL_COVERAGE}% < 80%"
+            echo "🛑 Deployment stopped due to insufficient test coverage."
+            exit 1
+          fi
+          
+      # 6. Build project for production
+      - name: Build Angular project
+        run: |
+          echo "🏗️ Building Angular project..."
+          
+          # Get project name from angular.json
+          PROJECT_NAME=$(node -p "require('./angular.json').defaultProject || Object.keys(require('./angular.json').projects)[0]")
+          echo "📦 Detected project name: $PROJECT_NAME"
+          
+          # Build with correct base-href for GitHub Pages
+          npm run build -- --base-href '/prompt2/'
+          
+          echo "✅ Build completed successfully"
+          
+      # 7. Copy index.html to 404.html (fix SPA routing)
+      - name: Fix SPA routing for GitHub Pages
+        run: |
+          echo "🔗 Fixing SPA routing..."
+          cp dist/prompt2/index.html dist/prompt2/404.html
+          echo "✅ Created 404.html for SPA routing"
+          
+      # 8. Configure GitHub Pages
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v4
+        
+      # 9. Upload build artifact
+      - name: Upload build artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist/prompt2'
+          
+      # 10. Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        
+      # Print deployed URL
+      - name: Print deployment URL
+        run: |
+          echo "🚀 Deployment completed successfully!"
+          echo "🌐 Your Angular app is now live at: ${{ steps.deployment.outputs.page_url }}"
+          echo "📊 Coverage report is available in the job artifacts"
