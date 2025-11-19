@@ -1,12 +1,9 @@
 name: Deploy Angular to GitHub Pages with Coverage Validation
 
-# WORKFLOW IS DISABLED BY DEFAULT
-# Uncomment the 'on.push' section below to enable automatic deployment on push
-# on:
-#   push:
-#     branches: [ main ]
-
+# WORKFLOW IS NOW ENABLED FOR AUTOMATIC DEPLOYMENT
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
